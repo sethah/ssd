@@ -1,0 +1,17 @@
+name: ssd
+channels:
+- conda-forge
+- defaults
+- pytorch
+dependencies:
+- python=3.6
+- matplotlib
+- numpy
+- pandas
+- scipy
+- pytorch
+- torchvision
+- cookiecutter
+- argparse=1.4.0
+- requests
+- ignite
