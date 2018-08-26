@@ -68,7 +68,16 @@ if __name__ == "__main__":
     parser.add_argument("--restore", type=str, default=None)
     parser.add_argument("--checkpoint_dir", type=str)
     parser.add_argument("--max_samples", type=int, default=None)
+    parser.add_argument("--num_gpu", type=int, default=None)
     args = parser.parse_args()
+
+    num_devices = torch.cuda.device_count()
+    if num_devices == 0:
+        devices = [torch.device("cpu")]
+    elif args.num_gpu is None:
+        devices = [torch.device(f"cuda:{i}") for i in range(num_devices)]
+    else:
+        devices = [torch.device(f"cuda:{i}") for i in range(args.num_gpu)]
 
     ############################################
     # Loading data
@@ -108,14 +117,10 @@ if __name__ == "__main__":
         normalize,
     ])
 
-    train_ds = datasets.ImageDataset(train_paths, train_labels, transform=img_transforms)
-    valid_ds = datasets.ImageDataset(valid_paths, valid_labels, transform=img_transforms)
+    train_ds = datasets.ImageDataset(train_paths, train_labels, transform=img_transforms, device=devices[0])
+    valid_ds = datasets.ImageDataset(valid_paths, valid_labels, transform=img_transforms, device=devices[0])
     train_loader = torch.utils.data.DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
     valid_loader = torch.utils.data.DataLoader(valid_ds, batch_size=args.batch_size)
-
-    inp, targ = next(iter(train_loader))
-    print(inp.shape)
-    print(targ.shape)
 
 
     ############################################
@@ -127,12 +132,13 @@ if __name__ == "__main__":
         model = torch.load(path)
     else:
         model = MyModel(num_categories)
+    model_par = nn.DataParallel(model, device_ids=[d.index for d in devices])
 
     ############################################
     # Optimizer/Loss
     ############################################
-    criterion = nn.CrossEntropyLoss()
-    model_opt = torch.optim.Adam(model.parameters(), lr=0.0001)
+    criterion = nn.CrossEntropyLoss().to(devices[0])
+    model_opt = torch.optim.Adam(model_par.parameters(), lr=0.0001)
 
     best_checkpointer = ModelCheckpoint(args.checkpoint_dir, 'my_model', create_dir=True,
                                    score_function=lambda eng: -eng.state.output,
@@ -143,9 +149,9 @@ if __name__ == "__main__":
     ############################################
     results = {'best_loss': 1000.}
     def training_update_function(engine, batch):
-        model.train()
+        model_par.train()
         inp, targ = batch
-        out = model.forward(inp)
+        out = model_par.forward(inp)
         loss = criterion(out, targ)
         loss.backward()
         model_opt.step()
@@ -155,9 +161,9 @@ if __name__ == "__main__":
 
 
     def inference(engine, batch):
-        model.eval()
+        model_par.eval()
         inp, targ = batch
-        out = model.forward(inp)
+        out = model_par.forward(inp)
         return out, targ
 
 
